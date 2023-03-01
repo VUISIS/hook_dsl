@@ -1,0 +1,9 @@
+(library
+  (name HookDSL)
+  (public_name frama-c-hook-dsl.core)
+  (flags -open Frama_c_kernel :standard)
+  (libraries frama-c.kernel))
+(plugin
+  (name hook-dsl)
+  (libraries frama-c-hook-dsl.core)
+  (site (frama-c plugins)))
