@@ -1,41 +1,6 @@
 open Cil_types
 open Logic_typing
 
-class process_hook_def out = object
-  inherit Visitor.frama_c_inplace
-
-  method! vvdec _ =
-    Format.fprintf out "vvdec\n";
-    Cil.DoChildren
-
-  method! vfile _ =
-    Format.fprintf out "vfile\n";
-    Cil.DoChildren
-
-  method! vglob_aux g =
-    match g with
-    | GType _ -> Format.fprintf out "GType\n"; Cil.DoChildren
-    | GCompTag _ -> Format.fprintf out "GCompTag\n"; Cil.DoChildren
-    | GCompTagDecl _ -> Format.fprintf out "GCompTagDecl\n"; Cil.DoChildren
-    | GEnumTag _ -> Format.fprintf out "GEnumTag\n"; Cil.DoChildren
-    | GEnumTagDecl _ -> Format.fprintf out "GEnumTagDecl\n"; Cil.DoChildren
-    | GVarDecl _ -> Format.fprintf out "GVarDecl\n"; Cil.DoChildren
-    | GFunDecl(_, vi, _) ->
-        Format.fprintf out "function "; Format.pp_print_string out vi.vname;
-        Format.fprintf out "\n";
-        Cil.DoChildren
-    | GVar _ -> Format.fprintf out "GVar\n"; Cil.DoChildren
-    | GFun _ -> Format.fprintf out "GFun\n"; Cil.DoChildren
-    | GAsm _ -> Format.fprintf out "GAsm\n"; Cil.DoChildren
-    | GPragma _ -> Format.fprintf out "GPragma\n"; Cil.DoChildren
-    | GText _ -> Format.fprintf out "GText\n"; Cil.DoChildren
-    | GAnnot _ -> Format.fprintf out "GAnnot\n"; Cil.DoChildren
-
-  method! vstmt_aux _ =
-    Format.fprintf out "vstmt_aux\n";
-    Cil.DoChildren
-end
-
 module Self = Plugin.Register(struct
   let name = "hook DSL"
   let shortname = "hook-dsl"
@@ -43,15 +8,16 @@ module Self = Plugin.Register(struct
 end)
 
 module Enabled = Self.False(struct
-  let option_name = "-cfg"
+  let option_name = "-hook"
   let help =
-   "when on (off by default), computes the CFG of all functions."
+   "when on (off by default), creates a hook template"
 end)
+
 module OutputFile = Self.String(struct
-  let option_name = "-cfg-output"
-  let default = "cfg.dot"
+  let option_name = "-hook-output"
+  let default = "gen_hook.c"
   let arg_name = "output-file"
-  let help = "file where the graph is output, in dot format."
+  let help = "file where hook template is written"
 end)
 
 let is_hookable g =
@@ -66,25 +32,23 @@ let is_hookable g =
   
 let get_alt_hook_name ekind =
   match ekind with
-  | Ext_id _ -> Printf.printf "ekind = Ext_Id\n"; None
-  | Ext_terms ts -> Printf.printf "ekind = Ext_terms\n"; 
-      Printf.printf "list length is %d\n" (List.length ts); 
+  | Ext_id _ -> None
+  | Ext_terms ts -> 
       if (List.length ts) > 0 then
         match (List.hd ts).term_node with
         | TConst lc ->
-            Printf.printf "term_node is TConst\n";
             (match lc with
              | LStr s -> Option.some s
-             | Integer _ -> Printf.printf "logic_constant is Integer\n"; None
-             | LWStr _ -> Printf.printf "logic_constant is LWStr\n"; None
-             | LChr _ -> Printf.printf "logic_constant is LChr\n"; None
-             | LReal _ -> Printf.printf "logic_constant is LReal\n"; None
-             | LEnum _ -> Printf.printf "logic_constant is LEnum\n"; None)
+             | Integer _ -> None
+             | LWStr _ -> None
+             | LChr _ -> None
+             | LReal _ -> None
+             | LEnum _ -> None)
         | _ -> None
       else
         None
-  | Ext_preds _ -> Printf.printf "ekind = Ext_preds\n"; None
-  | Ext_annot _ -> Printf.printf "ekind = Ext_annot\n"; None
+  | Ext_preds _ -> None
+  | Ext_annot _ -> None
 
 let rec find_hook_in_extended ext = 
   match ext with
@@ -114,45 +78,27 @@ let get_hook_name default_name beh =
     Option.value new_name ~default:default_name
 
 let rename_func vi spec =
-    vi.vname <- get_hook_name (vi.vname ^ "_hook") spec.spec_behavior;
-    Printf.printf "Hook function name set to %s\n" vi.vname;
-    vi
+  { vi with vstorage = Extern; vname = get_hook_name (vi.vname ^ "_hook") spec.spec_behavior }
 
 let rename_hook fundec =
   match fundec with
   | GFunDecl(spec, vi, l) -> GFunDecl(spec, rename_func vi spec, l)
   | _ -> fundec
 
-let handle_global out g =
-    match g with
-    | GType _ -> Format.fprintf out "GType\n"
-    | GCompTag _ -> Format.fprintf out "GCompTag\n"
-    | GCompTagDecl _ -> Format.fprintf out "GCompTagDecl\n"
-    | GEnumTag _ -> Format.fprintf out "GEnumTag\n"
-    | GEnumTagDecl _ -> Format.fprintf out "GEnumTagDecl\n"
-    | GVarDecl _ -> Format.fprintf out "GVarDecl\n"
-    | GFunDecl(spec, vi, _) ->
-        let _ = rename_hook g in
-        Printf.printf "There are %d behaviors in function %s\n"
-          (List.length spec.spec_behavior) vi.vname;
-        if List.length spec.spec_behavior > 0 then
-          let ext = List.hd spec.spec_behavior in
-          (Printf.printf "Spec name %s\n" ext.b_name;
-           Printf.printf "extension list has %d items\n" (List.length ext.b_extended)
-          );
-        Format.fprintf out "function "; Format.pp_print_string out vi.vname;
-        Format.fprintf out "\n";
-    | GVar _ -> Format.fprintf out "GVar\n"
-    | GFun _ -> Format.fprintf out "GFun\n"
-    | GAsm _ -> Format.fprintf out "GAsm\n"
-    | GPragma _ -> Format.fprintf out "GPragma\n"
-    | GText _ -> Format.fprintf out "GText\n"
-    | GAnnot _ -> Format.fprintf out "GAnnot\n"
-
-let create_hook_decl g =
+let generate_hook_function g =
   match g with
-  | GFunDecl(spec, vi, loc) -> GFunDecl(spec, vi, loc)
+  | GFunDecl(spec, vi, loc) ->
+      let f = 
+        { svar= vi; sformals = []; slocals = [];
+          smaxid=0;
+          sbody = { battrs = []; bscoping=true; blocals = []; bstatics = []; bstmts = []};
+          smaxstmtid=None;
+          sallstmts=[];
+          sspec=spec 
+          } in
+      GFun(f, loc)
   | _ -> g
+
 
 let run () =
   Printf.eprintf "Hookdsl starting\n";
@@ -163,12 +109,25 @@ let run () =
   Format.fprintf fmt "%!";
   close_out chan
 
-let process_file file =
-  let chan = open_out "hook.out" in
+let write_globals filename globals =
+  let chan = open_out filename in
   let fmt = Format.formatter_of_out_channel chan in
-  List.iter (handle_global fmt) (List.filter is_hookable file.globals);
-  Format.fprintf fmt "%!";
+  Cil_printer.pp_file fmt { fileName = Filepath.Normalized.of_string filename;
+    globals = globals; globinit = None; globinitcalled = false };
   close_out chan
+  
+let create_hook_filename file =
+  let filename = Filepath.Normalized.to_pretty_string file.fileName in
+  let prefix = String.sub filename 0 ((String.length filename) - 2) in
+  String.cat prefix "_hook.c"
+
+let process_file file =
+  let hookable_globals = List.filter is_hookable file.globals in
+  write_globals (create_hook_filename file) 
+    (List.append (List.map rename_hook hookable_globals)
+      (List.append
+            hookable_globals
+            (List.map generate_hook_function hookable_globals)))
   
 let type_hook typing_context _loc l =
   let type_term ctxt env (expr : Logic_ptree.lexpr) =
