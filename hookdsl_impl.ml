@@ -100,15 +100,6 @@ let generate_hook_function g =
   | _ -> g
 
 
-let run () =
-  Printf.eprintf "Hookdsl starting\n";
-  let chan = open_out "hook.out" in
-  let fmt = Format.formatter_of_out_channel chan in
-(*  Visitor.visitFramacFileSameGlobals (new process_hook_def fmt) (Ast.get ());*)
-  Printer.pp_file fmt (Ast.get());
-  Format.fprintf fmt "%!";
-  close_out chan
-
 let write_globals filename globals =
   let chan = open_out filename in
   let fmt = Format.formatter_of_out_channel chan in
@@ -116,10 +107,15 @@ let write_globals filename globals =
     globals = globals; globinit = None; globinitcalled = false };
   close_out chan
   
+(*
 let create_hook_filename file =
   let filename = Filepath.Normalized.to_pretty_string file.fileName in
   let prefix = String.sub filename 0 ((String.length filename) - 2) in
   String.cat prefix "_hook.c"
+  *)
+
+let create_hook_filename _ =
+  OutputFile.get ()
 
 let process_file file =
   let hookable_globals = List.filter is_hookable file.globals in
