@@ -103,6 +103,14 @@ The easiest way to install Dune is to use the Ocaml package manager Opam:
 
 ```sh
 opam install dune
+opam install frama-c
+```
+
+Then, build and install the plugin:
+
+```sh
+dune build
+dune install
 ```
 
 ## Running the Plugin
@@ -111,5 +119,5 @@ Use Dune to run the plugin. Use the `-hook-output` option to specify the name of
 the plugin writes the new declarations to.
 
 ```sh
-dune exec -- frama-c -hook-output hooked.c hookme.c
+frama-c -hook-output hooked.c hookme.c
 ```

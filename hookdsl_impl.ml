@@ -20,14 +20,33 @@ module OutputFile = Self.String(struct
   let help = "file where hook template is written"
 end)
 
+let get_filename g =
+  match g with
+  | GFunDecl(_, vi, _) -> vi.vname
+  | _ -> ""
+
 let is_hookable g =
+  Printf.printf "Checking to see if %s is hookable\n" (get_filename g);
   let has_hook beh =
     let is_hook ext =
+      Printf.printf "Looking for hook keyword in ext %s\n" ext.ext_name;
       ext.ext_name = "hook" in
     (List.find_opt is_hook beh.b_extended) != None
   in
   match g with
-  | GFunDecl(spec, _, _) -> (List.find_opt has_hook spec.spec_behavior) != None
+  | GFunDecl(spec, _, _) ->
+      let res = (List.find_opt has_hook spec.spec_behavior) != None in
+      (if res then
+        Printf.printf("Hookable\n")
+      else
+        Printf.printf("Not hookable\n"); res)
+  | GFun(dec,_) ->
+      let res = (List.find_opt has_hook dec.sspec.spec_behavior) != None in
+      (if res then
+        Printf.printf("Hookable\n")
+      else
+        Printf.printf("Not hookable\n"); res)
+
   | _ -> false
   
 let get_alt_hook_name ekind =
@@ -83,11 +102,43 @@ let rename_func vi spec =
 let rename_hook fundec =
   match fundec with
   | GFunDecl(spec, vi, l) -> GFunDecl(spec, rename_func vi spec, l)
+  | GFun(dec, l) ->
+      let f =
+        { svar=rename_func dec.svar dec.sspec; sformals = []; slocals = [];
+          smaxid=0;
+          sbody = { battrs = []; bscoping=true; blocals = []; bstatics = []; bstmts = []};
+          smaxstmtid=None;
+          sallstmts=[];
+          sspec=dec.sspec 
+        } in
+      GFun(f, l)
   | _ -> fundec
 
+let fun_to_decl g =
+  match g with
+  | GFun(dec, loc) -> GFunDecl(dec.sspec, dec.svar, loc)
+  | _ -> g
+
+let strip_fun_body g =
+  match g with
+  | GFun(dec, loc) ->
+      Printf.printf("Generating from GFun\n");
+      let f =
+        { svar=dec.svar; sformals = []; slocals = [];
+          smaxid=0;
+          sbody = { battrs = []; bscoping=true; blocals = []; bstatics = []; bstmts = []};
+          smaxstmtid=None;
+          sallstmts=[];
+          sspec=dec.sspec 
+        } in
+      GFun(f, loc)
+  | _ -> g
+
 let generate_hook_function g =
+  Printf.printf("Generating hook function\n");
   match g with
   | GFunDecl(spec, vi, loc) ->
+      Printf.printf("Generating from GFunDecl\n");
       let f = 
         { svar= vi; sformals = []; slocals = [];
           smaxid=0;
@@ -96,6 +147,17 @@ let generate_hook_function g =
           sallstmts=[];
           sspec=spec 
           } in
+      GFun(f, loc)
+  | GFun(dec, loc) ->
+      Printf.printf("Generating from GFun\n");
+      let f =
+        { svar=dec.svar; sformals = []; slocals = [];
+          smaxid=0;
+          sbody = { battrs = []; bscoping=true; blocals = []; bstatics = []; bstmts = []};
+          smaxstmtid=None;
+          sallstmts=[];
+          sspec=dec.sspec 
+        } in
       GFun(f, loc)
   | _ -> g
 
@@ -118,15 +180,17 @@ let create_hook_filename _ =
   OutputFile.get ()
 
 let process_file file =
-  let hookable_globals = List.filter is_hookable file.globals in
+  let hookable_globals = List.map strip_fun_body (List.filter is_hookable file.globals) in
+  let _ = List.iter (fun g -> Printf.printf "%s is hookable\n" (get_filename g)) hookable_globals in
   write_globals (create_hook_filename file) 
-    (List.append (List.map rename_hook hookable_globals)
+    (List.append (List.map rename_hook (List.map fun_to_decl hookable_globals))
       (List.append
-            hookable_globals
+            (List.map fun_to_decl hookable_globals)
             (List.map generate_hook_function hookable_globals)))
   
 let type_hook typing_context _loc l =
   let type_term ctxt env (expr : Logic_ptree.lexpr) =
+    Printf.printf "In type hook";
     match expr.lexpr_node with
     | Logic_ptree.PLvar hook_name -> Logic_const.tstring (String.sub hook_name 1 ((String.length hook_name)-1))
     | _ -> typing_context.type_term ctxt env expr
