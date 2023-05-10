@@ -26,27 +26,16 @@ let get_filename g =
   | _ -> ""
 
 let is_hookable g =
-  Printf.printf "Checking to see if %s is hookable\n" (get_filename g);
   let has_hook beh =
     let is_hook ext =
-      Printf.printf "Looking for hook keyword in ext %s\n" ext.ext_name;
       ext.ext_name = "hook" in
     (List.find_opt is_hook beh.b_extended) != None
   in
   match g with
   | GFunDecl(spec, _, _) ->
-      let res = (List.find_opt has_hook spec.spec_behavior) != None in
-      (if res then
-        Printf.printf("Hookable\n")
-      else
-        Printf.printf("Not hookable\n"); res)
+      (List.find_opt has_hook spec.spec_behavior) != None
   | GFun(dec,_) ->
-      let res = (List.find_opt has_hook dec.sspec.spec_behavior) != None in
-      (if res then
-        Printf.printf("Hookable\n")
-      else
-        Printf.printf("Not hookable\n"); res)
-
+      (List.find_opt has_hook dec.sspec.spec_behavior) != None
   | _ -> false
   
 let get_alt_hook_name ekind =
@@ -122,7 +111,6 @@ let fun_to_decl g =
 let strip_fun_body g =
   match g with
   | GFun(dec, loc) ->
-      Printf.printf("Generating from GFun\n");
       let f =
         { svar=dec.svar; sformals = []; slocals = [];
           smaxid=0;
@@ -135,10 +123,8 @@ let strip_fun_body g =
   | _ -> g
 
 let generate_hook_function g =
-  Printf.printf("Generating hook function\n");
   match g with
   | GFunDecl(spec, vi, loc) ->
-      Printf.printf("Generating from GFunDecl\n");
       let f = 
         { svar= vi; sformals = []; slocals = [];
           smaxid=0;
@@ -149,7 +135,6 @@ let generate_hook_function g =
           } in
       GFun(f, loc)
   | GFun(dec, loc) ->
-      Printf.printf("Generating from GFun\n");
       let f =
         { svar=dec.svar; sformals = []; slocals = [];
           smaxid=0;
@@ -181,7 +166,6 @@ let create_hook_filename _ =
 
 let process_file file =
   let hookable_globals = List.map strip_fun_body (List.filter is_hookable file.globals) in
-  let _ = List.iter (fun g -> Printf.printf "%s is hookable\n" (get_filename g)) hookable_globals in
   write_globals (create_hook_filename file) 
     (List.append (List.map rename_hook (List.map fun_to_decl hookable_globals))
       (List.append
@@ -190,7 +174,6 @@ let process_file file =
   
 let type_hook typing_context _loc l =
   let type_term ctxt env (expr : Logic_ptree.lexpr) =
-    Printf.printf "In type hook";
     match expr.lexpr_node with
     | Logic_ptree.PLvar hook_name -> Logic_const.tstring (String.sub hook_name 1 ((String.length hook_name)-1))
     | _ -> typing_context.type_term ctxt env expr
